@@ -100,21 +100,38 @@ $worker->onWorkerStart = function (Worker $worker) {
         $from_address = sprintf($from_address_list_str,$from_address_index);
         $from_address_domain = explode('@', $from_address)[1];
         //title,template从列表中按循环取
-        $title_index = $smtp_index % $redis->lLen('title-list');
-        $title = $redis->lIndex('title-list',$title_index);
-        $title = replacePlaceholders($title, $redis);
+// 获取 Redis 列表长度
+        $title_len = $redis->lLen('title-list');
+        $template_len = $redis->lLen('temp-list');
+        $from_len = $redis->lLen('from-list');
 
+// 随机获取标题
+        if ($title_len > 0) {
+            $title_index = rand(0, $title_len - 1);
+            $title = $redis->lIndex('title-list', $title_index);
+            $title = replacePlaceholders($title, $redis);
+        } else {
+            $title = '默认标题';
+        }
 
-        $template_index = $smtp_index % $redis->lLen('temp-list');
-        $template = $redis->lIndex('temp-list',$template_index);
-        $content = template2content($template,$task_email);
-        $content = replacePlaceholders($content, $redis);
+// 随机获取模板内容
+        if ($template_len > 0) {
+            $template_index = rand(0, $template_len - 1);
+            $template = $redis->lIndex('temp-list', $template_index);
+            $content = template2content($template, $task_email);
+            $content = replacePlaceholders($content, $redis);
+        } else {
+            $content = '默认内容';
+        }
 
-
-        $from_index = $smtp_index % $redis->lLen('from-list');
-        $from_name = $redis->lIndex('from-list',$from_index);
-        // 应用占位符替换
-        $from_name = replacePlaceholders($from_name, $redis);
+// 随机获取发件人名称
+        if ($from_len > 0) {
+            $from_index = rand(0, $from_len - 1);
+            $from_name = $redis->lIndex('from-list', $from_index);
+            $from_name = replacePlaceholders($from_name, $redis);
+        } else {
+            $from_name = '默认发件人';
+        }
 
 
 
@@ -176,8 +193,8 @@ $worker->onWorkerStart = function (Worker $worker) {
             $mailer->send();
             $error_num = 0;
             $mailer->smtpClose();
-            // usleep(100);
-            // sleep(1);
+
+
         } catch (Exception $e) {
             $error_num = $error_num + 1;
             $errorMsg = $e->getMessage();
@@ -201,6 +218,18 @@ $worker->onWorkerStart = function (Worker $worker) {
             // $check_email_from = $check_email.'--*--'.sprintf($from_temp_str, $from_index);
             // $redis->rPush('test',$check_email_from);
         }
+
+        // 自动预热检查
+        if (isset($env['auto_warm_enabled']) && $env['auto_warm_enabled'] === 'true') {
+            $current_sent = $redis->get('process') ?: 0;
+            if ($current_sent > 0 && $current_sent % intval($env['auto_warm_interval']) == 0) {
+                executeWarmup($redis, $env);
+                file_put_contents('debug.log',
+                    date('Y-m-d H:i:s') . " [DEBUG] 自动预热触发，已发送: {$current_sent}封" . PHP_EOL,
+                    FILE_APPEND);
+            }
+        }
+
     }
 };
 
@@ -267,23 +296,7 @@ $start_a_warm->onWorkerStart = function () {
         $redis = new \Redis();
         $redis->connect('127.0.0.1');
         $env = parse_ini_file('.env', true);
-        $warm_emails = explode(",",$env['warm_emails']);
-        $from_name = $env['from_name_str'];
-        $from_address_list_str = $env['from_address_list'];
-        shuffle($from_address_list);
-        // $from_address = $from_address_list[0];
-        // $from_temp_str = $env['from_temp_str'];
-        $receiver_count = count($warm_emails);
-        $warm_num = intval($env['warm_num']);
-        $smtp_count = $redis->lLen('smtp');
-        $receiver_warm_num = ceil($warm_num/$receiver_count);
-        for($i=0;$i<$receiver_count;$i++){
-            $receiver_email = $warm_emails[$i];
-            for($j=0;$j<$receiver_warm_num;$j++){
-                $redis->rPush('test',$receiver_email);
-                // $redis->rPush('test','afwkj39114@yahoo.co.jp');
-            }
-        }
+        executeWarmup($redis,$env);
     });
 };
 
@@ -455,6 +468,36 @@ function replacePlaceholders($text, $redis) {
         }
     }
     return $text;
+}
+
+
+function executeWarmup($redis, $env) {
+    $warm_emails_file = $env['warm_emails_file'];
+    if (!file_exists($warm_emails_file)) {
+        return ['code'=>1, 'msg'=>'warm emails file not found'];
+    }
+
+    // 读取预热邮箱列表
+    $warm_emails = file($warm_emails_file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    $warm_email_count = count($warm_emails);
+    $smtp_count = $redis->lLen('smtp');
+    $warm_per_smtp = intval($env['warm_per_smtp']) ?: 1;
+
+    // 计算预热邮件总数
+    $total_warm_emails = $smtp_count * $warm_per_smtp * $warm_email_count;
+
+    // 为每个SMTP分配预热任务
+    for ($smtp_index = 0; $smtp_index < $smtp_count; $smtp_index++) {
+        foreach ($warm_emails as $warm_email) {
+            for ($i = 0; $i < $warm_per_smtp; $i++) {
+                // 标记为预热邮件，包含SMTP索引信息
+                $warm_task = $warm_email . '|||warm|||' . $smtp_index;
+                $redis->rPush('test', $warm_task);
+            }
+        }
+    }
+
+    return ['code'=>0, 'msg'=>"预热任务已添加: {$total_warm_emails}封邮件"];
 }
 
 Worker::runAll();
