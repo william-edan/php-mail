@@ -135,7 +135,7 @@ if(isset($action)){
         $smtp_list_file = $env['smtp_list'];
         $title_list_file = $env['title_list'];
 //        $temp_list_str = $env['temp_list'];
-         $from_list_file = $env['from_list'];
+         $from_list_file = $env['name_list'];
         if (!file_exists($smtp_list_file)) {
             echo(json_encode(['code'=>1,'msg'=>'no smtp file or list']));
             exit();
@@ -144,10 +144,10 @@ if(isset($action)){
             echo(json_encode(['code'=>1,'msg'=>'no redirect']));
             exit();
         }
-        // if (!file_exists($from_list_file)) {
-        //     echo(json_encode(['code'=>1,'msg'=>'no from file']));
-        //     exit();
-        // }
+         if (!file_exists($from_list_file)) {
+             echo(json_encode(['code'=>1,'msg'=>'no from file']));
+             exit();
+         }
         $redis->del('smtp');
         $redis->del('from-list');
         $redis->del('temp-list');
