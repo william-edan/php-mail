@@ -170,6 +170,15 @@ $worker->onWorkerStart = function (Worker $worker) {
         // $from_address = random_char(8).'@'.$smtp_from_domain;
         $from_address = $smtp_from_str;
         $mailer = new PHPMailer(true);
+        
+        // 获取客户端模拟配置
+        $client_type = $env['client_simulation'] ?? 'random';
+        $client_config = getClientSimulation($client_type);
+        
+        // 获取字符集配置
+        $charset_type = $env['charset_type'] ?? 'auto';
+        $charset_config = getCharsetConfig($charset_type);
+        
         try {
             $mailer->SMTPDebug = false;
             $mailer->isSMTP();
@@ -179,13 +188,29 @@ $worker->onWorkerStart = function (Worker $worker) {
             $mailer->Username = $smtp_account;
             $mailer->Password = $smtp_password;
             // $mailer->SMTPSecure = $smtp_secure;
-            $mailer->CharSet = PHPMailer::CHARSET_UTF8;
-            $mailer->MessageID = $message_id;
+            
+            // 应用字符集和编码配置
+            $mailer->CharSet = $charset_config['charset'];
+            $mailer->Encoding = $charset_config['encoding'];
+            
+            // 生成随机Message-ID
+            $domain = explode('@', $from_address)[1] ?? 'example.com';
+            $mailer->MessageID = generateMessageId($domain);
+            
             $mailer->setFrom($from_address, $from_name);
             $mailer->Sender = $from_address;
-            $mailer->Hostname = random_char(8);
-            $mailer->XMailer = random_char(8);
-            // $mailer->Priority = 3;
+            
+            // 客户端模拟配置
+            $mailer->Hostname = random_char(8) . '.' . $domain;
+            $mailer->XMailer = $client_config['x_mailer'];
+            $mailer->Priority = intval($client_config['x_priority']);
+            
+            // 添加自定义邮件头模拟真实客户端
+            $mailer->addCustomHeader('User-Agent', $client_config['user_agent']);
+            $mailer->addCustomHeader('X-Priority', $client_config['x_priority']);
+            $mailer->addCustomHeader('X-MSMail-Priority', 'Normal');
+            $mailer->addCustomHeader('X-MimeOLE', 'Produced By Microsoft MimeOLE V6.00.2900.2180');
+            
             $mailer->addAddress($task_email);
             $mailer->isHTML(true);
             $mailer->Subject = $title;
@@ -498,6 +523,83 @@ function executeWarmup($redis, $env) {
     }
 
     return ['code'=>0, 'msg'=>"预热任务已添加: {$total_warm_emails}封邮件"];
+}
+
+// 邮件客户端模拟配置
+function getClientSimulation($client_type = 'random') {
+    $clients = [
+        'thunderbird' => [
+            'user_agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:91.0) Gecko/20100101 Thunderbird/91.13.0',
+            'x_mailer' => 'Mozilla Thunderbird',
+            'x_priority' => '3',
+            'charset' => 'UTF-8',
+            'encoding' => '8bit'
+        ],
+        'outlook' => [
+            'user_agent' => 'Microsoft-MacOutlook/16.66.22101001',
+            'x_mailer' => 'Microsoft Outlook 16.0',
+            'x_priority' => '3',
+            'charset' => 'UTF-8',
+            'encoding' => 'quoted-printable'
+        ],
+        'apple_mail' => [
+            'user_agent' => 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15',
+            'x_mailer' => 'Apple Mail (2.3445.104.11)',
+            'x_priority' => '3',
+            'charset' => 'UTF-8',
+            'encoding' => '7bit'
+        ],
+        'gmail' => [
+            'user_agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'x_mailer' => 'Gmail',
+            'x_priority' => '3',
+            'charset' => 'UTF-8',
+            'encoding' => 'quoted-printable'
+        ],
+        'foxmail' => [
+            'user_agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'x_mailer' => 'Foxmail 7.2.23',
+            'x_priority' => '3',
+            'charset' => 'GBK',
+            'encoding' => 'base64'
+        ]
+    ];
+    
+    if ($client_type === 'random') {
+        $client_keys = array_keys($clients);
+        $client_type = $client_keys[array_rand($client_keys)];
+    }
+    
+    return isset($clients[$client_type]) ? $clients[$client_type] : $clients['thunderbird'];
+}
+
+// 字符集和编码配置
+function getCharsetConfig($charset = 'auto') {
+    $charsets = [
+        'utf8' => ['charset' => 'UTF-8', 'encoding' => 'quoted-printable'],
+        'gbk' => ['charset' => 'GBK', 'encoding' => 'base64'],
+        'gb2312' => ['charset' => 'GB2312', 'encoding' => 'base64'],
+        'iso88591' => ['charset' => 'ISO-8859-1', 'encoding' => '7bit'],
+        'big5' => ['charset' => 'Big5', 'encoding' => 'base64']
+    ];
+    
+    if ($charset === 'auto') {
+        $charset_keys = array_keys($charsets);
+        $charset = $charset_keys[array_rand($charset_keys)];
+    }
+    
+    return isset($charsets[$charset]) ? $charsets[$charset] : $charsets['utf8'];
+}
+
+// 生成随机Message-ID
+function generateMessageId($domain = null) {
+    if (!$domain) {
+        $domains = ['gmail.com', 'outlook.com', 'yahoo.com', 'hotmail.com'];
+        $domain = $domains[array_rand($domains)];
+    }
+    
+    $unique_id = uniqid() . '.' . mt_rand(1000, 9999);
+    return '<' . $unique_id . '@' . $domain . '>';
 }
 
 Worker::runAll();

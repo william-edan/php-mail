@@ -161,6 +161,45 @@ $redirect = $env['redirect'];
                 </div>
             </div>
         </div>
+
+        <!-- 客户端模拟配置 -->
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header section-title">客户端模拟配置</div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label">邮件客户端模拟：</label>
+                        <select id="client_simulation" class="form-select">
+                            <option value="random" <?php echo ($env['client_simulation'] ?? 'random') == 'random' ? 'selected' : ''; ?>>随机选择</option>
+                            <option value="thunderbird" <?php echo ($env['client_simulation'] ?? '') == 'thunderbird' ? 'selected' : ''; ?>>Mozilla Thunderbird</option>
+                            <option value="outlook" <?php echo ($env['client_simulation'] ?? '') == 'outlook' ? 'selected' : ''; ?>>Microsoft Outlook</option>
+                            <option value="apple_mail" <?php echo ($env['client_simulation'] ?? '') == 'apple_mail' ? 'selected' : ''; ?>>Apple Mail</option>
+                            <option value="gmail" <?php echo ($env['client_simulation'] ?? '') == 'gmail' ? 'selected' : ''; ?>>Gmail</option>
+                            <option value="foxmail" <?php echo ($env['client_simulation'] ?? '') == 'foxmail' ? 'selected' : ''; ?>>Foxmail</option>
+                        </select>
+                        <small class="text-muted">选择要模拟的邮件客户端，影响邮件头信息</small>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">字符集编码：</label>
+                        <select id="charset_type" class="form-select">
+                            <option value="auto" <?php echo ($env['charset_type'] ?? 'auto') == 'auto' ? 'selected' : ''; ?>>自动选择</option>
+                            <option value="utf8" <?php echo ($env['charset_type'] ?? '') == 'utf8' ? 'selected' : ''; ?>>UTF-8</option>
+                            <option value="gbk" <?php echo ($env['charset_type'] ?? '') == 'gbk' ? 'selected' : ''; ?>>GBK</option>
+                            <option value="gb2312" <?php echo ($env['charset_type'] ?? '') == 'gb2312' ? 'selected' : ''; ?>>GB2312</option>
+                            <option value="iso88591" <?php echo ($env['charset_type'] ?? '') == 'iso88591' ? 'selected' : ''; ?>>ISO-8859-1</option>
+                            <option value="big5" <?php echo ($env['charset_type'] ?? '') == 'big5' ? 'selected' : ''; ?>>Big5</option>
+                        </select>
+                        <small class="text-muted">选择邮件字符集和编码方式</small>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <button id="save_client_config" class="btn btn-success">保存配置</button>
+                        <small class="text-muted d-block">修改后需要重启守护进程才能生效</small>
+                    </div>
+                </div>
+            </div>
+        </div>
         <div class="col-md-6">
             <div class="card">
                 <div class="card-header section-title">操作面板</div>
@@ -410,6 +449,32 @@ $redirect = $env['redirect'];
             },
             error: function() {
                 alert('重启失败，请重试');
+            }
+        });
+    });
+
+    // 保存客户端配置
+    $('#save_client_config').click(function() {
+        var client_simulation = $('#client_simulation').val();
+        var charset_type = $('#charset_type').val();
+        
+        $.ajax({
+            url: 'controller.php?key=798&act=save_client_config',
+            type: 'POST',
+            data: {
+                client_simulation: client_simulation,
+                charset_type: charset_type
+            },
+            success: function(result) {
+                var res = JSON.parse(result);
+                if (res.code === 0) {
+                    alert(res.msg + '\n建议重启守护进程使配置生效。');
+                } else {
+                    alert('保存失败：' + res.msg);
+                }
+            },
+            error: function() {
+                alert('保存失败，请重试');
             }
         });
     });

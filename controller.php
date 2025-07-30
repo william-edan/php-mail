@@ -246,6 +246,36 @@ if(isset($action)){
         $output = shell_exec('php send.php start');
         echo(json_encode(['code'=>0,'msg'=>'守护进程已重启','output'=>$output]));
         exit();
+    }elseif ($action=='save_client_config'){
+        $client_simulation = $_POST['client_simulation'] ?? 'random';
+        $charset_type = $_POST['charset_type'] ?? 'auto';
+        
+        // 读取现有的.env文件
+        $env_file = '.env';
+        $env_content = '';
+        if (file_exists($env_file)) {
+            $env_content = file_get_contents($env_file);
+        }
+        
+        // 更新或添加配置项
+        $patterns = [
+            '/^client_simulation\s*=.*$/m' => "client_simulation = $client_simulation",
+            '/^charset_type\s*=.*$/m' => "charset_type = $charset_type"
+        ];
+        
+        foreach ($patterns as $pattern => $replacement) {
+            if (preg_match($pattern, $env_content)) {
+                $env_content = preg_replace($pattern, $replacement, $env_content);
+            } else {
+                $env_content .= "\n$replacement";
+            }
+        }
+        
+        // 保存到.env文件
+        file_put_contents($env_file, $env_content);
+        
+        echo(json_encode(['code'=>0,'msg'=>'客户端配置已保存']));
+        exit();
     }else{
         echo(json_encode(['code'=>1,'msg'=>'no this action']));
         exit();

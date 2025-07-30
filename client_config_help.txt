@@ -1,0 +1,94 @@
+邮件客户端模拟和字符集配置说明
+=================================
+
+## 客户端模拟功能
+
+支持模拟以下邮件客户端，让邮件看起来更像真实客户端发送：
+
+1. **Mozilla Thunderbird** (thunderbird)
+   - User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:91.0) Gecko/20100101 Thunderbird/91.13.0
+   - X-Mailer: Mozilla Thunderbird
+   - 编码: 8bit
+
+2. **Microsoft Outlook** (outlook)
+   - User-Agent: Microsoft-MacOutlook/16.66.22101001
+   - X-Mailer: Microsoft Outlook 16.0
+   - 编码: quoted-printable
+
+3. **Apple Mail** (apple_mail)
+   - User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15
+   - X-Mailer: Apple Mail (2.3445.104.11)
+   - 编码: 7bit
+
+4. **Gmail** (gmail)
+   - User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36
+   - X-Mailer: Gmail
+   - 编码: quoted-printable
+
+5. **Foxmail** (foxmail)
+   - User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36
+   - X-Mailer: Foxmail 7.2.23
+   - 编码: base64
+
+6. **随机选择** (random)
+   - 每次发送随机选择一个客户端模拟
+
+## 字符集编码支持
+
+支持以下字符集和编码方式：
+
+1. **UTF-8** (utf8)
+   - 字符集: UTF-8
+   - 编码: quoted-printable
+   - 推荐用于国际化邮件
+
+2. **GBK** (gbk)
+   - 字符集: GBK
+   - 编码: base64
+   - 适用于简体中文
+
+3. **GB2312** (gb2312)
+   - 字符集: GB2312
+   - 编码: base64
+   - 简体中文标准编码
+
+4. **ISO-8859-1** (iso88591)
+   - 字符集: ISO-8859-1
+   - 编码: 7bit
+   - 适用于西欧语言
+
+5. **Big5** (big5)
+   - 字符集: Big5
+   - 编码: base64
+   - 适用于繁体中文
+
+6. **自动选择** (auto)
+   - 随机选择一个字符集
+
+## 邮件头信息模拟
+
+系统会自动添加以下邮件头来模拟真实客户端：
+
+- User-Agent: 客户端标识
+- X-Mailer: 邮件客户端名称
+- X-Priority: 邮件优先级
+- X-MSMail-Priority: Microsoft邮件优先级
+- X-MimeOLE: MIME版本信息
+- Message-ID: 随机生成的唯一邮件ID
+
+## 配置方法
+
+1. 在管理面板的"客户端模拟配置"卡片中选择：
+   - 邮件客户端模拟类型
+   - 字符集编码类型
+
+2. 点击"保存配置"按钮
+
+3. 重启守护进程使配置生效
+
+## 注意事项
+
+- 修改配置后必须重启守护进程才能生效
+- 随机模式可以增加邮件的多样性，避免被识别为批量邮件
+- 不同字符集适用于不同语言环境，请根据目标用户选择
+- 客户端模拟可以提高邮件的送达率和信任度 
