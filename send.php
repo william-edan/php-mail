@@ -1,4 +1,8 @@
 <?php
+// 设置内部编码为UTF-8
+mb_internal_encoding('UTF-8');
+ini_set('default_charset', 'UTF-8');
+
 require_once __DIR__ . '/vendor/autoload.php';
 
 
@@ -46,7 +50,6 @@ $worker->onWorkerStart = function (Worker $worker) {
     $warm_email_count = count($warm_emails);
     $check_email = $env['check_email'];
     $run_warm_email = $env['run_warm_email'];
-//    $from_name_str = $env['from_name_str'];
     $from_address_list_str = $env['from_address_list'];
     $from_address_index = $env['from_address_index'];
     $test_interval = intval($env['test_interval']);
@@ -57,15 +60,10 @@ $worker->onWorkerStart = function (Worker $worker) {
             sleep(10);
             continue;
         }
-
         $task_email = $redis->lPop('test');
         if(empty($task_email)){
             $task_email = $redis->lPop('task');
         }
-
-        file_put_contents('debug.log',
-            date('Y-m-d H:i:s') . " [DEBUG] 获取邮件: " . $task_email . PHP_EOL,
-            FILE_APPEND);
 
         if (empty($task_email) && file_get_contents('status.txt')) {
             file_put_contents('status.txt' , '');
@@ -98,10 +96,6 @@ $worker->onWorkerStart = function (Worker $worker) {
             // 使用默认值
             $smtp_port = 2525;
             $smtp_secure = '';
-            
-            file_put_contents('debug.log',
-                date('Y-m-d H:i:s') . " [WARNING] 使用旧SMTP格式，建议更新为: host----port----account----password----secure----from_address" . PHP_EOL,
-                FILE_APPEND);
         } else {
             // 配置格式错误
             file_put_contents('debug.log',
@@ -113,16 +107,9 @@ $worker->onWorkerStart = function (Worker $worker) {
         // 验证端口号
         if ($smtp_port <= 0 || $smtp_port > 65535) {
             $smtp_port = 2525; // 默认端口
-            file_put_contents('debug.log',
-                date('Y-m-d H:i:s') . " [WARNING] SMTP端口无效，使用默认端口2525" . PHP_EOL,
-                FILE_APPEND);
+
         }
 
-        // $from_address_list = explode(',', $from_address_list_str);
-        // shuffle($from_address_list);
-        // $from_address = $from_address_list[0];
-        // $ip_not_dot_str = str_replace(".", "", $smtp_host);
-        // $from_address = sprintf($from_address_list_str,$from_address_index.'-'.$ip_not_dot_str);
         $from_address = sprintf($from_address_list_str,$from_address_index);
         $from_address_domain = explode('@', $from_address)[1];
         //title,template从列表中按循环取
@@ -159,41 +146,10 @@ $worker->onWorkerStart = function (Worker $worker) {
             $from_name = '默认发件人';
         }
 
-
-
-
-        // $content = $template;
         $task_email_name = explode('@', $task_email)[0];
 
-
-
-
-        if($is_warm_flag){
-            // $from_name = 'Apple ID';
-            // $title = 'Apple ID';
-            // $content = random_char(8);
-        }else{
-            // $from_name = 'Apple ID';
-            // $title = 'Apple ID';
-            // $content = random_char(8);
-        }
-        // $from_name = 'test';
-        // $title = 'test';
-        // $content = random_char(8);
-        if($task_email==$check_email||$task_email==$run_warm_email||$task_email==$warm_emails[0]||$task_email==$warm_emails[1]){
-            $title = random_char(rand(4, 8)).','.$title;
-        }else{
-            $title = $task_email_name.','.$title;
-        }
-        // $title = $title.'('.random_char(rand(4, 8)).')';
         $message_id = sprintf('<%s-%s@%s>', random_char(8), random_char(8), random_char(8));
-        // $message_id = sprintf('<%s-%s@%s>', random_char(8), random_char(8), $from_address_domain);
-        // $from_address = random_char(rand(4, 8)).'@'.$from_address_domain;
-        // $from_address = random_char(8).'@'.$from_address_domain;
-        // $ip_no_dot = str_replace(".","",$smtp_host);
-        // $from_address = 'support-'.$ip_no_dot.'@'.$from_address_domain;
-        // $from_address = 'no-reply@'.random_char(8).'.google.com';
-        // $from_address = random_char(8).'@'.$smtp_from_domain;
+
         $from_address = $smtp_from_str;
         $mailer = new PHPMailer(true);
         
@@ -202,7 +158,7 @@ $worker->onWorkerStart = function (Worker $worker) {
         $client_config = getClientSimulation($client_type);
         
         // 获取字符集配置
-        $charset_type = $env['charset_type'] ?? 'auto';
+        $charset_type = $env['charset_type'] ?? 'utf8';  // 默认UTF-8，但不强制
         $charset_config = getCharsetConfig($charset_type);
         
         // 新功能配置
@@ -229,10 +185,6 @@ $worker->onWorkerStart = function (Worker $worker) {
             if ($smtp_port == 465) {
                 // 465端口使用明文（禁用自动STARTTLS）
                 $mailer->SMTPAutoTLS = false;  // 关键：禁用自动TLS协商
-                file_put_contents('debug.log',
-                    date('Y-m-d H:i:s') . " [INFO] 465端口使用明文SMTP，禁用自动TLS" . PHP_EOL,
-                    FILE_APPEND);
-                
             } else {
                 // 其他端口：按配置的协议
                 if (!empty($smtp_secure)) {
@@ -249,10 +201,7 @@ $worker->onWorkerStart = function (Worker $worker) {
                             'allow_self_signed' => true
                         ]
                     ];
-                    
-                    file_put_contents('debug.log',
-                        date('Y-m-d H:i:s') . " [INFO] 使用{$smtp_secure}协议，端口: {$smtp_port}" . PHP_EOL,
-                        FILE_APPEND);
+
                 }
             }
             // 增加超时时间
@@ -266,7 +215,10 @@ $worker->onWorkerStart = function (Worker $worker) {
             $domain = explode('@', $from_address)[1] ?? 'example.com';
             $mailer->MessageID = generateMessageId($domain);
             
-            $mailer->setFrom($from_address, $from_name);
+            // 确保发件人名称正确编码
+            $from_name = mb_convert_encoding($from_name, $charset_config['charset'], 'auto');
+            $encoded_from_name = mb_encode_mimeheader($from_name, $charset_config['charset'], 'B');
+            $mailer->setFrom($from_address, $encoded_from_name);
             $mailer->Sender = $from_address;
             
             // 客户端模拟配置
@@ -279,59 +231,52 @@ $worker->onWorkerStart = function (Worker $worker) {
             $mailer->addCustomHeader('X-Priority', $client_config['x_priority']);
             $mailer->addCustomHeader('X-MSMail-Priority', 'Normal');
             $mailer->addCustomHeader('X-MimeOLE', 'Produced By Microsoft MimeOLE V6.00.2900.2180');
-            
             $mailer->addAddress($task_email);
             
-            // ===== 新功能1: RFC 2047主题编码 =====
-            if ($enable_rfc2047_subject === 'true') {
-                $encodedSubject = encodeSubjectRFC2047($title, 'UTF-8', $subject_encoding_type);
-                $mailer->Subject = $encodedSubject;
-                
-                file_put_contents('debug.log',
-                    date('Y-m-d H:i:s') . " [DEBUG] RFC2047主题编码: 原文=" . $title . " 编码后=" . $encodedSubject . PHP_EOL,
-                    FILE_APPEND);
-            } else {
-                $mailer->Subject = $title;
-            }
+            // 确保内容和标题编码正确
+            $content = mb_convert_encoding($content, $charset_config['charset'], 'auto');
+            $title = mb_convert_encoding($title, $charset_config['charset'], 'auto');
             
+            // 编码邮件主题
+            $encodedSubject = encodeSubjectRFC2047($title, $charset_config['charset'], $subject_encoding_type);
+            $mailer->Subject = $encodedSubject;
             // ===== 新功能2: multipart/alternative 邮件结构 =====
-            // 检测内容是否为HTML格式
-            $isHtml = isHtmlContent($content);
             
-            if (/*$isHtml &&*/ $enable_multipart_alternative === 'true') {
-                // 设置为HTML邮件
-                $mailer->isHTML(true);
-                $mailer->Body = $content;  // HTML版本（保留链接）
-                
-                // 生成纯文本版本（移除链接）
-                $plainTextContent = htmlToPlainNoLink($content);
-                $mailer->AltBody = $plainTextContent;  // 纯文本版本
-                
-                file_put_contents('debug.log',
-                    date('Y-m-d H:i:s') . " [DEBUG] 发送multipart/alternative邮件到: " . $task_email . 
-                    " HTML长度: " . strlen($content) . " 纯文本长度: " . strlen($plainTextContent) . PHP_EOL,
-                    FILE_APPEND);
-                    
-            } elseif ($isHtml) {
-                // HTML邮件但不启用multipart/alternative
-                $mailer->isHTML(true);
-                $mailer->Body = $content;
-                
-            } else {
-                // 纯文本邮件
-                $mailer->isHTML(false);
-                $mailer->Body = $content;
+            // 设置为HTML邮件
+            $mailer->isHTML(true);
+            $mailer->Body = $content;  // HTML版本（保留链接）
+
+            // 生成纯文本版本（移除链接）
+            $plainTextContent = htmlToPlainNoLink($content);
+            $mailer->AltBody = $plainTextContent;  // 纯文本版本
+
+            // 检查收件人是否为空
+            if (empty($task_email) || trim($task_email) === '') {
+                throw new Exception("收件人邮箱地址为空");
             }
+            
+            // 记录发送详情
+            $protocol_used = $smtp_port == 465 ? '明文' : ($smtp_secure ?: '明文');
+            $log_content = date('Y-m-d H:i:s') . " [SEND] 准备发送邮件" . PHP_EOL .
+                "  服务器: {$smtp_host}:{$smtp_port} ({$protocol_used})" . PHP_EOL .
+                "  发件人: {$from_address}" . PHP_EOL .
+                "  收件人: {$task_email}" . PHP_EOL .
+                "  标题: {$title}" . PHP_EOL .
+                "  内容长度: " . mb_strlen($content) . " 字符" . PHP_EOL .
+                "  内容预览: " . mb_substr(strip_tags($content), 0, 100) . "..." . PHP_EOL;
+            
+            // 确保日志内容编码正确
+            $log_content = mb_convert_encoding($log_content, $charset_config['charset'], 'auto');
+            file_put_contents('debug.log', $log_content, FILE_APPEND | LOCK_EX);
             
             // 简单发送，不重试
             $mailer->send();
             $error_num = 0;
             
             // 记录成功信息
-            $protocol_used = $smtp_port == 465 ? '明文' : ($smtp_secure ?: '明文');
-            file_put_contents('debug.log',
-                date('Y-m-d H:i:s') . " [SUCCESS] 邮件发送成功，协议: {$protocol_used}" . PHP_EOL,
-                FILE_APPEND);
+            $success_log = date('Y-m-d H:i:s') . " [SUCCESS] 邮件发送成功到 {$task_email}" . PHP_EOL;
+            $success_log = mb_convert_encoding($success_log, $charset_config['charset'], 'auto');
+            file_put_contents('debug.log', $success_log, FILE_APPEND | LOCK_EX);
             
             $mailer->smtpClose();
 
@@ -345,14 +290,25 @@ $worker->onWorkerStart = function (Worker $worker) {
             $error_analysis = analyzeSmtpError($errorMsg, $smtp_host, $smtp_port, $smtp_secure);
             
             // 原始错误记录
-            file_put_contents(date('Y-m-d') . '-error.txt', date('Y-m-d H:i:s') . '|' . $smtp_host.'|' .
+            $raw_error_log = date('Y-m-d H:i:s') . '|' . $smtp_host.'|' .
                 $smtp_port.'|' . $smtp_account . '|' . $smtp_password.'|' . $smtp_secure.'|' . $from_address.'|' . $from_name . '|' .
-                $task_email . '|'. $content.'|' . $title.'|' . $errorMsg . PHP_EOL, FILE_APPEND);
+                $task_email . '|'. $content.'|' . $title.'|' . $errorMsg . PHP_EOL;
+            $raw_error_log = mb_convert_encoding($raw_error_log, $charset_config['charset'], 'auto');
+            file_put_contents(date('Y-m-d') . '-error.txt', $raw_error_log, FILE_APPEND | LOCK_EX);
             
-            // 详细错误分析记录
-            file_put_contents('debug.log',
-                date('Y-m-d H:i:s') . " [ERROR] 协议:{$current_protocol} | " . $error_analysis . PHP_EOL,
-                FILE_APPEND);
+            // 详细错误信息记录
+            $error_log = date('Y-m-d H:i:s') . " [ERROR] 邮件发送失败" . PHP_EOL .
+                "  服务器: {$smtp_host}:{$smtp_port} ({$current_protocol})" . PHP_EOL .
+                "  发件人: {$from_address}" . PHP_EOL .
+                "  收件人: {$task_email}" . PHP_EOL .
+                "  标题: {$title}" . PHP_EOL .
+                "  内容长度: " . mb_strlen($content) . " 字符" . PHP_EOL .
+                "  错误信息: {$errorMsg}" . PHP_EOL .
+                "  分析: {$error_analysis}" . PHP_EOL;
+            
+            // 确保错误日志编码正确
+            $error_log = mb_convert_encoding($error_log, $charset_config['charset'], 'auto');
+            file_put_contents('debug.log', $error_log, FILE_APPEND | LOCK_EX);
             
             $redis->incr('error');
             // sleep($error_num);
@@ -734,7 +690,7 @@ function generateMessageId($domain = null) {
  * RFC 2047主题编码 - 支持分段式长主题编码
  * 处理包含日文/中文/Emoji的长主题
  */
-function encodeSubjectRFC2047($subject, $charset = 'UTF-8', $encoding = 'B', $maxLineLength = 76) {
+function encodeSubjectRFC2047($subject, $charset = 'UTF-8', $encoding = 'B', $maxLineLength = 40) {
     // 如果主题只包含ASCII字符，直接返回
     if (mb_check_encoding($subject, 'ASCII')) {
         return $subject;
