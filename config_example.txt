@@ -1,0 +1,81 @@
+# 邮件系统配置示例
+# 将以下配置添加到您的 .env 文件中
+
+# ========== 基础邮件配置 ==========
+# 测试邮箱（用于发送测试邮件）
+check_email=test@example.com
+# 预热邮箱运行
+run_warm_email=warm@example.com
+# 预热邮箱列表（逗号分隔）
+warm_emails=warm1@example.com,warm2@example.com
+# 预热邮箱文件路径
+warm_emails_file=预热邮箱.txt
+
+# 发件人地址模板（%s 会被替换为索引号）
+from_address_list=noreply%s@example.com
+from_address_index=1
+# 重定向链接
+redirect=https://example.com
+
+# 停止进程数量
+stop_process=1000
+# 测试间隔
+test_interval=100
+
+# ========== 新增功能配置 ==========
+# RFC 2047主题编码功能
+# 启用分段式主题编码，支持中文/日文/Emoji长主题
+enable_rfc2047_subject=true
+# 主题编码类型：B=Base64, Q=Quoted-Printable
+subject_encoding_type=B
+
+# multipart/alternative 邮件结构功能
+# 自动生成HTML+纯文本双版本邮件，纯文本版本会移除所有链接
+enable_multipart_alternative=true
+
+# ========== 客户端模拟配置 ==========
+# 客户端模拟类型：thunderbird, outlook, apple_mail, gmail, foxmail, random
+client_simulation=random
+
+# ========== 字符集配置 ==========
+# 字符集类型：utf8, gbk, gb2312, iso88591, big5, auto
+charset_type=auto
+
+# ========== 自动预热配置 ==========
+# 启用自动预热
+auto_warm_enabled=false
+# 自动预热间隔（每发送多少封邮件后执行一次预热）
+auto_warm_interval=500
+# 每个SMTP预热邮件数量
+warm_per_smtp=2
+
+# ========== 加密配置 ==========
+# 加密密钥（如需要）
+encrypt_key=your_encrypt_key_here
+
+# ========== 功能说明 ==========
+# 
+# 1. RFC 2047主题编码功能：
+#    - enable_rfc2047_subject=true  启用主题编码
+#    - subject_encoding_type=B      使用Base64编码（推荐）
+#    - subject_encoding_type=Q      使用Quoted-Printable编码
+#    
+#    功能：自动处理包含中文、日文、emoji的邮件主题
+#    效果：【三菱UFJ銀行】重要なお知らせ 
+#         -> =?UTF-8?B?44CQ5LiJ6I+x55So?= =?UTF-8?B?RkrpirHooYzjgJHph43opoHjgpI=?=
+#
+# 2. multipart/alternative 邮件结构功能：
+#    - enable_multipart_alternative=true  启用双版本邮件
+#    
+#    功能：自动检测HTML内容并生成纯文本版本
+#    效果：
+#    - HTML版本：<a href="https://example.com">点击这里</a>
+#    - 纯文本版本：点击这里（移除链接）
+#    - 邮件客户端优先显示HTML版本
+#    - 纯文本模式下显示无链接版本
+#
+# 3. 使用建议：
+#    - 钓鱼邮件：建议全部启用，提高兼容性
+#    - 营销邮件：建议启用multipart/alternative
+#    - 包含中日文主题：强烈建议启用RFC2047编码
+#    - 纯文本邮件：可以禁用multipart/alternative 

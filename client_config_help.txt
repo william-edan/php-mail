@@ -92,3 +92,41 @@
 - 随机模式可以增加邮件的多样性，避免被识别为批量邮件
 - 不同字符集适用于不同语言环境，请根据目标用户选择
 - 客户端模拟可以提高邮件的送达率和信任度 
+
+=== 新增邮件功能配置说明 ===
+
+## RFC 2047主题编码功能
+# 启用分段式主题编码，支持中文/日文/Emoji长主题
+enable_rfc2047_subject=true          # true=启用, false=禁用
+subject_encoding_type=B              # B=Base64编码, Q=Quoted-Printable编码
+
+## multipart/alternative 邮件结构功能  
+# 自动生成HTML+纯文本双版本邮件，纯文本版本会移除所有链接
+enable_multipart_alternative=true    # true=启用, false=禁用
+
+## 功能说明：
+# 1. RFC 2047主题编码：
+#    - 自动检测主题是否包含非ASCII字符
+#    - 按照RFC 2047标准进行分段编码
+#    - 支持超长主题的正确显示
+#    - 每段最大75字节，符合邮件标准
+#
+# 2. multipart/alternative邮件结构：
+#    - 同时发送HTML版本（保留链接）和纯文本版本（移除链接）
+#    - 邮件客户端优先显示HTML版本
+#    - 纯文本模式或网关过滤时显示纯文本版本
+#    - 自动识别模板是否包含HTML标签
+#    - 智能转换：<a href="...">链接文字</a> → 链接文字
+#    - 保留文本格式：<p>段落</p>、<br>换行等转为相应格式
+
+## 使用建议：
+# - 钓鱼邮件场景：建议都启用，提高兼容性和隐蔽性
+# - 营销邮件场景：建议启用multipart/alternative，提供更好用户体验
+# - 纯文本邮件：无需启用multipart/alternative
+# - 包含中文/日文主题：强烈建议启用RFC 2047编码
+
+## 调试日志：
+# 启用后会在debug.log中记录：
+# - RFC2047编码前后的主题对比
+# - multipart/alternative邮件的HTML和纯文本长度
+# - 邮件结构类型识别结果 

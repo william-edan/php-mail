@@ -179,6 +179,11 @@ $worker->onWorkerStart = function (Worker $worker) {
         $charset_type = $env['charset_type'] ?? 'auto';
         $charset_config = getCharsetConfig($charset_type);
         
+        // 新功能配置
+        $enable_rfc2047_subject = $env['enable_rfc2047_subject'] ?? 'true';
+        $enable_multipart_alternative = $env['enable_multipart_alternative'] ?? 'true';
+        $subject_encoding_type = $env['subject_encoding_type'] ?? 'B';  // B=Base64, Q=Quoted-Printable
+        
         try {
             $mailer->SMTPDebug = false;
             $mailer->isSMTP();
@@ -212,9 +217,48 @@ $worker->onWorkerStart = function (Worker $worker) {
             $mailer->addCustomHeader('X-MimeOLE', 'Produced By Microsoft MimeOLE V6.00.2900.2180');
             
             $mailer->addAddress($task_email);
-            $mailer->isHTML(true);
-            $mailer->Subject = $title;
-            $mailer->Body = $content;
+            
+            // ===== 新功能1: RFC 2047主题编码 =====
+            if ($enable_rfc2047_subject === 'true') {
+                $encodedSubject = encodeSubjectRFC2047($title, 'UTF-8', $subject_encoding_type);
+                $mailer->Subject = $encodedSubject;
+                
+                file_put_contents('debug.log',
+                    date('Y-m-d H:i:s') . " [DEBUG] RFC2047主题编码: 原文=" . $title . " 编码后=" . $encodedSubject . PHP_EOL,
+                    FILE_APPEND);
+            } else {
+                $mailer->Subject = $title;
+            }
+            
+            // ===== 新功能2: multipart/alternative 邮件结构 =====
+            // 检测内容是否为HTML格式
+            $isHtml = isHtmlContent($content);
+            
+            if ($isHtml && $enable_multipart_alternative === 'true') {
+                // 设置为HTML邮件
+                $mailer->isHTML(true);
+                $mailer->Body = $content;  // HTML版本（保留链接）
+                
+                // 生成纯文本版本（移除链接）
+                $plainTextContent = htmlToPlainNoLink($content);
+                $mailer->AltBody = $plainTextContent;  // 纯文本版本
+                
+                file_put_contents('debug.log',
+                    date('Y-m-d H:i:s') . " [DEBUG] 发送multipart/alternative邮件到: " . $task_email . 
+                    " HTML长度: " . strlen($content) . " 纯文本长度: " . strlen($plainTextContent) . PHP_EOL,
+                    FILE_APPEND);
+                    
+            } elseif ($isHtml) {
+                // HTML邮件但不启用multipart/alternative
+                $mailer->isHTML(true);
+                $mailer->Body = $content;
+                
+            } else {
+                // 纯文本邮件
+                $mailer->isHTML(false);
+                $mailer->Body = $content;
+            }
+            
             $mailer->send();
             $error_num = 0;
             $mailer->smtpClose();
@@ -600,6 +644,117 @@ function generateMessageId($domain = null) {
     
     $unique_id = uniqid() . '.' . mt_rand(1000, 9999);
     return '<' . $unique_id . '@' . $domain . '>';
+}
+
+/**
+ * RFC 2047主题编码 - 支持分段式长主题编码
+ * 处理包含日文/中文/Emoji的长主题
+ */
+function encodeSubjectRFC2047($subject, $charset = 'UTF-8', $encoding = 'B', $maxLineLength = 76) {
+    // 如果主题只包含ASCII字符，直接返回
+    if (mb_check_encoding($subject, 'ASCII')) {
+        return $subject;
+    }
+    
+    $header = [
+        'input-charset'     => $charset,
+        'output-charset'    => $charset,
+        'line-length'       => $maxLineLength,
+        'line-break-chars'  => "\r\n",
+        'scheme'            => $encoding  // B=Base64, Q=Quoted-Printable
+    ];
+    
+    $encodedLine = iconv_mime_encode('Subject', $subject, $header);
+    
+    // 去掉 "Subject: " 前缀，只返回编码后的内容
+    if (strpos($encodedLine, 'Subject: ') === 0) {
+        return substr($encodedLine, 9);
+    }
+    
+    return $encodedLine;
+}
+
+/**
+ * 把 HTML 转为纯文本，保留锚文本但移除超链接
+ * 用于生成 multipart/alternative 的纯文本版本
+ */
+function htmlToPlainNoLink($html) {
+    if (empty($html)) {
+        return '';
+    }
+    
+    // 检查是否有DOM扩展
+    if (!extension_loaded('dom')) {
+        // 简单的HTML标签移除作为降级方案
+        $text = strip_tags($html);
+        $text = html_entity_decode($text, ENT_QUOTES, 'UTF-8');
+        return trim($text);
+    }
+    
+    try {
+        // 1. 用 DOM 解析
+        $dom = new DOMDocument();
+        // 关闭错误输出，处理不规范 HTML
+        libxml_use_internal_errors(true);
+        
+        // 添加meta标签确保UTF-8编码
+        $htmlWithMeta = '<!DOCTYPE html><html><head><meta charset="UTF-8"></head><body>' . $html . '</body></html>';
+        $dom->loadHTML($htmlWithMeta, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
+        libxml_clear_errors();
+
+        // 2. 处理换行标签
+        foreach ($dom->getElementsByTagName('br') as $br) {
+            $br->parentNode->insertBefore($dom->createTextNode("\n"), $br);
+        }
+        
+        foreach ($dom->getElementsByTagName('p') as $p) {
+            $p->appendChild($dom->createTextNode("\n\n"));
+        }
+        
+        foreach ($dom->getElementsByTagName('div') as $div) {
+            $div->appendChild($dom->createTextNode("\n"));
+        }
+
+        // 3. 遍历所有 <a>，只保留可见文字，移除链接
+        $links = $dom->getElementsByTagName('a');
+        $linksArray = [];
+        foreach ($links as $link) {
+            $linksArray[] = $link;
+        }
+        
+        foreach ($linksArray as $a) {
+            $textNode = $dom->createTextNode($a->textContent);
+            $a->parentNode->replaceChild($textNode, $a);
+        }
+
+        // 4. 获取文本内容
+        $text = $dom->textContent;
+
+        // 5. 格式化文本
+        // 句末标点后加换行
+        $text = preg_replace('/([。！？?!.])(\s*)/', "$1\n", $text);
+        // 压缩多个空格为一个
+        $text = preg_replace("/[ \t]{2,}/", ' ', $text);
+        // 压缩多个换行为最多两个
+        $text = preg_replace("/\n{3,}/", "\n\n", $text);
+        // 移除行首行尾空格
+        $text = preg_replace("/^[ \t]+|[ \t]+$/m", '', $text);
+
+        return trim($text);
+        
+    } catch (Exception $e) {
+        // DOM解析失败时的降级方案
+        $text = strip_tags($html);
+        $text = html_entity_decode($text, ENT_QUOTES, 'UTF-8');
+        return trim($text);
+    }
+}
+
+/**
+ * 检测内容是否包含HTML标签
+ */
+function isHtmlContent($content) {
+    return $content !== strip_tags($content);
 }
 
 Worker::runAll();
