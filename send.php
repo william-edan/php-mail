@@ -84,13 +84,39 @@ $worker->onWorkerStart = function (Worker $worker) {
         }
         $smtp_index = $smtp_incr_index % $redis->lLen('smtp');
         $smtp_item_str = $redis->lIndex('smtp',$smtp_index);
-        // $smtp_secure='ssl';
-        list($smtp_host,$smtp_account,$smtp_password,$smtp_from_str) = explode('----', $smtp_item_str);
-        $smtp_port = 2525;
-        // $smtp_port = 587;
-        $smtp_secure='';
-        // $smtp_port = 2525;
-        // $smtp_secure='ssl';
+        
+        // 解析SMTP配置：host----port----account----password----secure----from_address
+        $smtp_parts = explode('----', $smtp_item_str);
+        
+        if (count($smtp_parts) >= 6) {
+            // 新格式：包含端口和安全设置
+            list($smtp_host, $smtp_port, $smtp_account, $smtp_password, $smtp_secure, $smtp_from_str) = $smtp_parts;
+            $smtp_port = intval($smtp_port); // 确保是整数
+        } elseif (count($smtp_parts) >= 4) {
+            // 旧格式兼容：host----account----password----from_address
+            list($smtp_host, $smtp_account, $smtp_password, $smtp_from_str) = $smtp_parts;
+            // 使用默认值
+            $smtp_port = 2525;
+            $smtp_secure = '';
+            
+            file_put_contents('debug.log',
+                date('Y-m-d H:i:s') . " [WARNING] 使用旧SMTP格式，建议更新为: host----port----account----password----secure----from_address" . PHP_EOL,
+                FILE_APPEND);
+        } else {
+            // 配置格式错误
+            file_put_contents('debug.log',
+                date('Y-m-d H:i:s') . " [ERROR] SMTP配置格式错误: " . $smtp_item_str . PHP_EOL,
+                FILE_APPEND);
+            continue;
+        }
+        
+        // 验证端口号
+        if ($smtp_port <= 0 || $smtp_port > 65535) {
+            $smtp_port = 2525; // 默认端口
+            file_put_contents('debug.log',
+                date('Y-m-d H:i:s') . " [WARNING] SMTP端口无效，使用默认端口2525" . PHP_EOL,
+                FILE_APPEND);
+        }
 
         // $from_address_list = explode(',', $from_address_list_str);
         // shuffle($from_address_list);
@@ -185,14 +211,70 @@ $worker->onWorkerStart = function (Worker $worker) {
         $subject_encoding_type = $env['subject_encoding_type'] ?? 'B';  // B=Base64, Q=Quoted-Printable
         
         try {
-            $mailer->SMTPDebug = false;
+            // 临时启用详细调试
+            $mailer->SMTPDebug = 3;  // 0=关闭, 1=客户端, 2=客户端+服务器, 3=详细
+            $mailer->Debugoutput = function($str, $level) {
+                file_put_contents('smtp_debug.log', 
+                    date('Y-m-d H:i:s') . " [LEVEL{$level}] " . trim($str) . PHP_EOL, 
+                    FILE_APPEND);
+            };
             $mailer->isSMTP();
             $mailer->SMTPAuth = true;
             $mailer->Host = $smtp_host;
             $mailer->Port = $smtp_port;
             $mailer->Username = $smtp_account;
             $mailer->Password = $smtp_password;
-            // $mailer->SMTPSecure = $smtp_secure;
+            
+            // 智能SMTP连接：先尝试配置的协议，失败时自动回退
+            $connection_success = false;
+            $connection_attempts = [];
+            
+            // 第一次尝试：使用配置的协议
+            if (!empty($smtp_secure)) {
+                try {
+                    if ($smtp_secure == 'ssl' && $smtp_port == 465) {
+                        $mailer->SMTPSecure = PHPMailer::ENCRYPTION_SMTPS;
+                        $mailer->SMTPOptions = [
+                            'ssl' => [
+                                'verify_peer' => false,
+                                'verify_peer_name' => false,
+                                'allow_self_signed' => true,
+                                'disable_compression' => true,
+                                'SNI_enabled' => true,
+                                'ciphers' => 'HIGH:!SSLv2:!SSLv3'
+                            ]
+                        ];
+                    } else {
+                        $mailer->SMTPSecure = $smtp_secure;
+                        $mailer->SMTPOptions = [
+                            'ssl' => [
+                                'verify_peer' => false,
+                                'verify_peer_name' => false,
+                                'allow_self_signed' => true
+                            ]
+                        ];
+                    }
+                    
+                    file_put_contents('debug.log',
+                        date('Y-m-d H:i:s') . " [DEBUG] 首次尝试SMTP协议: " . $smtp_secure . " 端口: " . $smtp_port . PHP_EOL,
+                        FILE_APPEND);
+                    
+                    $connection_attempts[] = "尝试" . $smtp_secure . "协议";
+                } catch (Exception $e) {
+                    $connection_attempts[] = $smtp_secure . "协议失败: " . $e->getMessage();
+                }
+            }
+            
+            // 特殊处理：465端口SSL失败时自动尝试明文
+            $auto_fallback_to_plain = false;
+            if ($smtp_port == 465 && !empty($smtp_secure) && $smtp_secure == 'ssl') {
+                $auto_fallback_to_plain = true;
+                file_put_contents('debug.log',
+                    date('Y-m-d H:i:s') . " [DEBUG] 465端口检测到SSL配置，准备回退机制" . PHP_EOL,
+                    FILE_APPEND);
+            }
+            // 增加超时时间
+            $mailer->Timeout = 60;  // 60秒超时
             
             // 应用字符集和编码配置
             $mailer->CharSet = $charset_config['charset'];
@@ -259,17 +341,165 @@ $worker->onWorkerStart = function (Worker $worker) {
                 $mailer->Body = $content;
             }
             
-            $mailer->send();
-            $error_num = 0;
-            $mailer->smtpClose();
+            // 智能邮件发送：自动重试机制
+            $send_success = false;
+            $final_error = null;
+            
+            try {
+                // 第一次尝试：使用当前配置
+                $mailer->send();
+                $send_success = true;
+                $connection_attempts[] = "发送成功";
+                file_put_contents('debug.log',
+                    date('Y-m-d H:i:s') . " [SUCCESS] 邮件发送成功，使用协议: " . ($smtp_secure ?: '明文') . PHP_EOL,
+                    FILE_APPEND);
+                    
+            } catch (Exception $e) {
+                $error_msg = $e->getMessage();
+                $final_error = $e;
+                $connection_attempts[] = "首次发送失败: " . $error_msg;
+                
+                                 // 特殊错误处理
+                 $is_ssl_error = (strpos($error_msg, 'SSL23_GET_SERVER_HELLO:unknown protocol') !== false ||
+                                 strpos($error_msg, 'SSL operation failed') !== false ||
+                                 (strpos($error_msg, 'Failed to connect') !== false && $auto_fallback_to_plain));
+                 
+                 $is_auth_error = (strpos($error_msg, 'authentication failed') !== false ||
+                                  strpos($error_msg, 'Could not authenticate') !== false ||
+                                  strpos($error_msg, '535 5.7.8') !== false);
+                 
+                 // 记录详细的认证失败信息
+                 if ($is_auth_error) {
+                     file_put_contents('debug.log',
+                         date('Y-m-d H:i:s') . " [AUTH_ERROR] 认证失败详情:" . PHP_EOL .
+                         "  服务器: {$smtp_host}:{$smtp_port}" . PHP_EOL .
+                         "  用户名: {$smtp_account}" . PHP_EOL .
+                         "  密码长度: " . strlen($smtp_password) . " 字符" . PHP_EOL .
+                         "  安全协议: " . ($smtp_secure ?: '明文') . PHP_EOL .
+                         "  错误信息: {$error_msg}" . PHP_EOL,
+                         FILE_APPEND);
+                 }
+                 
+                 // 检查是否为SSL协议错误（465端口的常见问题）
+                 if ($is_ssl_error) {
+                    
+                    file_put_contents('debug.log',
+                        date('Y-m-d H:i:s') . " [FALLBACK] 检测到SSL协议错误，尝试明文连接" . PHP_EOL,
+                        FILE_APPEND);
+                    
+                    try {
+                        // 重新创建PHPMailer实例，使用明文连接
+                        $mailer_fallback = new PHPMailer(true);
+                        
+                        // 复制调试设置
+                        $mailer_fallback->SMTPDebug = $mailer->SMTPDebug;
+                        $mailer_fallback->Debugoutput = $mailer->Debugoutput;
+                        
+                        // 基本SMTP设置（明文）
+                        $mailer_fallback->isSMTP();
+                        $mailer_fallback->SMTPAuth = true;
+                        $mailer_fallback->Host = $smtp_host;
+                        $mailer_fallback->Port = $smtp_port;
+                        $mailer_fallback->Username = $smtp_account;
+                        $mailer_fallback->Password = $smtp_password;
+                        
+                        // 关键：不设置SMTPSecure，使用明文连接
+                        // $mailer_fallback->SMTPSecure = ''; // 明文
+                        
+                        $mailer_fallback->Timeout = 60;
+                        
+                        // 复制字符集和编码
+                        $mailer_fallback->CharSet = $mailer->CharSet;
+                        $mailer_fallback->Encoding = $mailer->Encoding;
+                        
+                        // 复制邮件内容
+                        $mailer_fallback->setFrom($from_address, $from_name);
+                        $mailer_fallback->Sender = $from_address;
+                        $mailer_fallback->addAddress($task_email);
+                        
+                        // 应用RFC 2047主题编码
+                        if ($enable_rfc2047_subject === 'true' && !isAscii($title)) {
+                            $mailer_fallback->Subject = encodeSubjectRFC2047($title, 'UTF-8', $subject_encoding_type);
+                        } else {
+                            $mailer_fallback->Subject = $title;
+                        }
+                        
+                        // 复制邮件体设置
+                        if ($enable_multipart_alternative === 'true' && isHtmlContent($content)) {
+                            $mailer_fallback->isHTML(true);
+                            $mailer_fallback->Body = $content;
+                            $mailer_fallback->AltBody = htmlToPlainNoLink($content);
+                        } elseif (isHtmlContent($content)) {
+                            $mailer_fallback->isHTML(true);
+                            $mailer_fallback->Body = $content;
+                        } else {
+                            $mailer_fallback->isHTML(false);
+                            $mailer_fallback->Body = $content;
+                        }
+                        
+                        // 复制其他设置
+                        $mailer_fallback->MessageID = $mailer->MessageID;
+                        $mailer_fallback->Hostname = $mailer->Hostname;
+                        $mailer_fallback->XMailer = $mailer->XMailer;
+                        $mailer_fallback->Priority = $mailer->Priority;
+                        
+                        // 尝试明文发送
+                        $mailer_fallback->send();
+                        $send_success = true;
+                        $connection_attempts[] = "明文连接成功";
+                        
+                        file_put_contents('debug.log',
+                            date('Y-m-d H:i:s') . " [SUCCESS] 明文SMTP发送成功！服务器确实运行明文协议" . PHP_EOL,
+                            FILE_APPEND);
+                        
+                        $mailer_fallback->smtpClose();
+                        
+                    } catch (Exception $e2) {
+                        $connection_attempts[] = "明文连接也失败: " . $e2->getMessage();
+                        $final_error = $e2; // 使用最后的错误
+                        
+                        file_put_contents('debug.log',
+                            date('Y-m-d H:i:s') . " [FAILED] 明文连接也失败: " . $e2->getMessage() . PHP_EOL,
+                            FILE_APPEND);
+                    }
+                }
+            }
+            
+            if ($send_success) {
+                $error_num = 0;
+                // 记录成功的连接尝试信息
+                file_put_contents('debug.log',
+                    date('Y-m-d H:i:s') . " [INFO] 连接尝试记录: " . implode(' | ', $connection_attempts) . PHP_EOL,
+                    FILE_APPEND);
+            } else {
+                // 发送失败，抛出最后的错误
+                if ($final_error) {
+                    throw $final_error;
+                }
+            }
+            
+            if (isset($mailer) && $mailer->isConnected()) {
+                $mailer->smtpClose();
+            }
 
 
         } catch (Exception $e) {
             $error_num = $error_num + 1;
             $errorMsg = $e->getMessage();
+            
+            // 智能错误分析和建议
+            $error_analysis = analyzeSmtpError($errorMsg, $smtp_host, $smtp_port, $smtp_secure);
+            
+            // 原始错误记录
             file_put_contents(date('Y-m-d') . '-error.txt', date('Y-m-d H:i:s') . '|' . $smtp_host.'|' .
                 $smtp_port.'|' . $smtp_account . '|' . $smtp_password.'|' . $smtp_secure.'|' . $from_address.'|' . $from_name . '|' .
                 $task_email . '|'. $content.'|' . $title.'|' . $errorMsg . PHP_EOL, FILE_APPEND);
+            
+            // 详细错误分析记录
+            file_put_contents('debug.log',
+                date('Y-m-d H:i:s') . " [ERROR_ANALYSIS] " . $error_analysis . PHP_EOL,
+                FILE_APPEND);
+            
             $redis->incr('error');
             // sleep($error_num);
         }
@@ -755,6 +985,105 @@ function htmlToPlainNoLink($html) {
  */
 function isHtmlContent($content) {
     return $content !== strip_tags($content);
+}
+
+/**
+ * 检查字符串是否为纯ASCII
+ * 
+ * @param string $str 待检查的字符串
+ * @return bool true表示纯ASCII，false表示包含非ASCII字符
+ */
+function isAscii($str) {
+    return mb_check_encoding($str, 'ASCII');
+}
+
+/**
+ * 智能SMTP错误分析和建议
+ * 
+ * @param string $errorMsg 错误消息
+ * @param string $host SMTP主机
+ * @param int $port SMTP端口
+ * @param string $secure 安全协议
+ * @return string 分析结果和建议
+ */
+function analyzeSmtpError($errorMsg, $host, $port, $secure) {
+    $analysis = "SMTP错误分析: ";
+    $suggestions = [];
+    
+    // SSL/TLS协议错误
+    if (strpos($errorMsg, 'SSL23_GET_SERVER_HELLO:unknown protocol') !== false ||
+        strpos($errorMsg, 'SSL operation failed') !== false) {
+        
+        $analysis .= "SSL协议不匹配 - 服务器可能运行明文SMTP";
+        $suggestions[] = "建议修改配置去掉SSL参数";
+        $suggestions[] = "将 '{$host}----{$port}----user----pass----ssl----email' 改为 '{$host}----{$port}----user----pass--------email'";
+        
+        if ($port == 465) {
+            $suggestions[] = "特别注意：465端口通常用于SSL，但此服务器运行明文协议";
+        }
+        
+    } elseif (strpos($errorMsg, 'authentication failed') !== false ||
+              strpos($errorMsg, 'Could not authenticate') !== false ||
+              strpos($errorMsg, '535 5.7.8') !== false) {
+        
+        $analysis .= "SMTP认证失败";
+        $suggestions[] = "检查用户名和密码是否正确";
+        $suggestions[] = "确认SMTP服务器是否启用了认证";
+        $suggestions[] = "检查账户是否被锁定或暂停";
+        
+        if ($port == 587) {
+            $suggestions[] = "587端口通常需要STARTTLS，确认secure参数为'tls'";
+        }
+        
+    } elseif (strpos($errorMsg, 'Could not connect') !== false ||
+              strpos($errorMsg, 'Connection refused') !== false) {
+        
+        $analysis .= "连接失败";
+        $suggestions[] = "检查服务器地址和端口是否正确";
+        $suggestions[] = "确认网络连接正常";
+        $suggestions[] = "检查防火墙设置";
+        
+    } elseif (strpos($errorMsg, 'STARTTLS') !== false) {
+        
+        $analysis .= "STARTTLS协议问题";
+        $suggestions[] = "尝试将secure参数从'tls'改为'ssl'或留空";
+        
+        if ($port == 25) {
+            $suggestions[] = "25端口通常不支持加密，尝试明文连接";
+        }
+        
+    } elseif (strpos($errorMsg, 'Invalid address') !== false) {
+        
+        $analysis .= "邮件地址格式错误";
+        $suggestions[] = "检查发件人和收件人邮箱地址格式";
+        $suggestions[] = "确认邮箱地址不包含特殊字符";
+        
+    } else {
+        $analysis .= "未知错误类型";
+        $suggestions[] = "检查SMTP服务器状态";
+        $suggestions[] = "查看完整错误日志获取更多信息";
+    }
+    
+    // 添加通用端口建议
+    $port_advice = "";
+    switch ($port) {
+        case 25:
+            $port_advice = " | 端口25: 标准SMTP，通常明文";
+            break;
+        case 465:
+            $port_advice = " | 端口465: 传统SSL，但此服务器可能运行明文";
+            break;
+        case 587:
+            $port_advice = " | 端口587: 现代SMTP，通常使用STARTTLS";
+            break;
+        case 2525:
+            $port_advice = " | 端口2525: 备用SMTP端口";
+            break;
+    }
+    
+    $result = $analysis . $port_advice . " | 建议: " . implode('; ', $suggestions);
+    
+    return $result;
 }
 
 Worker::runAll();

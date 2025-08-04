@@ -93,6 +93,30 @@
 - 不同字符集适用于不同语言环境，请根据目标用户选择
 - 客户端模拟可以提高邮件的送达率和信任度 
 
+=== SMTP配置格式更新 ===
+
+## 新的SMTP配置格式
+# 现在支持完整的SMTP配置，包括端口和安全设置
+# 格式：host----port----account----password----secure----from_address
+# 
+# 示例：
+# smtp.gmail.com----587----username@gmail.com----password----tls----noreply@example.com
+# smtp.qq.com----465----username@qq.com----password----ssl----support@example.com
+# smtp.163.com----25----username@163.com----password--------info@example.com
+#
+# 参数说明：
+# - host: SMTP服务器地址
+# - port: SMTP端口 (25/465/587/2525等)
+# - account: SMTP账号
+# - password: SMTP密码
+# - secure: 安全协议 (ssl/tls/starttls 或留空)
+# - from_address: 发件人邮箱地址
+#
+# 兼容性：
+# - 系统仍支持旧格式：host----account----password----from_address
+# - 旧格式会使用默认端口2525和无安全协议
+# - 建议更新到新格式以获得更好的兼容性
+
 === 新增邮件功能配置说明 ===
 
 ## RFC 2047主题编码功能
