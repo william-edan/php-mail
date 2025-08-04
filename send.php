@@ -70,6 +70,14 @@ $worker->onWorkerStart = function (Worker $worker) {
             sleep(10);
             continue;
         }
+        
+        // 提前检查收件人是否为空或无效
+        if (empty($task_email) || trim($task_email) === '') {
+            // 记录跳过信息
+            $skip_log = date('Y-m-d H:i:s') . " [SKIP] 收件人为空，跳过处理" . PHP_EOL;
+            file_put_contents('debug.log', $skip_log, FILE_APPEND | LOCK_EX);
+            continue;
+        }
         $is_warm_flag = false;
         if(in_array($task_email,$warm_emails)){
             $is_warm_flag = true;
@@ -250,11 +258,7 @@ $worker->onWorkerStart = function (Worker $worker) {
             $plainTextContent = htmlToPlainNoLink($content);
             $mailer->AltBody = $plainTextContent;  // 纯文本版本
 
-            // 检查收件人是否为空
-            if (empty($task_email) || trim($task_email) === '') {
-                throw new Exception("收件人邮箱地址为空");
-            }
-            
+
             // 记录发送详情
             $protocol_used = $smtp_port == 465 ? '明文' : ($smtp_secure ?: '明文');
             $log_content = date('Y-m-d H:i:s') . " [SEND] 准备发送邮件" . PHP_EOL .
@@ -660,7 +664,7 @@ function getClientSimulation($client_type = 'random') {
 // 字符集和编码配置
 function getCharsetConfig($charset = 'auto') {
     $charsets = [
-        'utf8' => ['charset' => 'UTF-8', 'encoding' => 'quoted-printable'],
+        'utf8' => ['charset' => 'UTF-8', 'encoding' => 'base64'],
         'gbk' => ['charset' => 'GBK', 'encoding' => 'base64'],
         'gb2312' => ['charset' => 'GB2312', 'encoding' => 'base64'],
         'iso88591' => ['charset' => 'ISO-8859-1', 'encoding' => '7bit'],
@@ -722,71 +726,67 @@ function htmlToPlainNoLink($html) {
     if (empty($html)) {
         return '';
     }
-    
-    // 检查是否有DOM扩展
+
     if (!extension_loaded('dom')) {
-        // 简单的HTML标签移除作为降级方案
         $text = strip_tags($html);
-        $text = html_entity_decode($text, ENT_QUOTES, 'UTF-8');
-        return trim($text);
+        return html_entity_decode(trim($text), ENT_QUOTES, 'UTF-8');
     }
-    
+
     try {
-        // 1. 用 DOM 解析
         $dom = new DOMDocument();
-        // 关闭错误输出，处理不规范 HTML
         libxml_use_internal_errors(true);
-        
-        // 添加meta标签确保UTF-8编码
         $htmlWithMeta = '<!DOCTYPE html><html><head><meta charset="UTF-8"></head><body>' . $html . '</body></html>';
         $dom->loadHTML($htmlWithMeta, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
         libxml_clear_errors();
 
-        // 2. 处理换行标签
+        // 移除 <script>, <style>, <head>, <meta>, <title> 等
+        $removeTags = ['script', 'style', 'head', 'meta', 'title'];
+        foreach ($removeTags as $tag) {
+            $nodes = $dom->getElementsByTagName($tag);
+            $toRemove = [];
+            foreach ($nodes as $node) {
+                $toRemove[] = $node;
+            }
+            foreach ($toRemove as $node) {
+                $node->parentNode->removeChild($node);
+            }
+        }
+
+        // 替换 <br> 为换行
         foreach ($dom->getElementsByTagName('br') as $br) {
             $br->parentNode->insertBefore($dom->createTextNode("\n"), $br);
         }
-        
-        foreach ($dom->getElementsByTagName('p') as $p) {
-            $p->appendChild($dom->createTextNode("\n\n"));
-        }
-        
-        foreach ($dom->getElementsByTagName('div') as $div) {
-            $div->appendChild($dom->createTextNode("\n"));
+
+        // 换行标记处理
+        foreach (['p', 'div', 'tr', 'li'] as $tag) {
+            foreach ($dom->getElementsByTagName($tag) as $el) {
+                $el->appendChild($dom->createTextNode("\n"));
+            }
         }
 
-        // 3. 遍历所有 <a>，只保留可见文字，移除链接
+        // 去除 <a> 的链接，保留纯文本
         $links = $dom->getElementsByTagName('a');
-        $linksArray = [];
-        foreach ($links as $link) {
-            $linksArray[] = $link;
+        $linkArray = [];
+        foreach ($links as $a) {
+            $linkArray[] = $a;
         }
-        
-        foreach ($linksArray as $a) {
+        foreach ($linkArray as $a) {
             $textNode = $dom->createTextNode($a->textContent);
             $a->parentNode->replaceChild($textNode, $a);
         }
 
-        // 4. 获取文本内容
         $text = $dom->textContent;
 
-        // 5. 格式化文本
-        // 句末标点后加换行
+        // 格式化输出
         $text = preg_replace('/([。！？?!.])(\s*)/', "$1\n", $text);
-        // 压缩多个空格为一个
         $text = preg_replace("/[ \t]{2,}/", ' ', $text);
-        // 压缩多个换行为最多两个
         $text = preg_replace("/\n{3,}/", "\n\n", $text);
-        // 移除行首行尾空格
         $text = preg_replace("/^[ \t]+|[ \t]+$/m", '', $text);
 
-        return trim($text);
-        
+        return trim(html_entity_decode($text, ENT_QUOTES, 'UTF-8'));
+
     } catch (Exception $e) {
-        // DOM解析失败时的降级方案
-        $text = strip_tags($html);
-        $text = html_entity_decode($text, ENT_QUOTES, 'UTF-8');
-        return trim($text);
+        return trim(html_entity_decode(strip_tags($html), ENT_QUOTES, 'UTF-8'));
     }
 }
 
