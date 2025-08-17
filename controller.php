@@ -249,31 +249,29 @@ if(isset($action)){
     }elseif ($action=='save_client_config'){
         $client_simulation = $_POST['client_simulation'] ?? 'random';
         $charset_type = $_POST['charset_type'] ?? 'auto';
-        
+        $custom_headers = isset($_POST['custom_headers']) ? trim($_POST['custom_headers']) : '';
         // 读取现有的.env文件
         $env_file = '.env';
         $env_content = '';
         if (file_exists($env_file)) {
             $env_content = file_get_contents($env_file);
         }
-        
         // 更新或添加配置项
         $patterns = [
             '/^client_simulation\s*=.*$/m' => "client_simulation = $client_simulation",
-            '/^charset_type\s*=.*$/m' => "charset_type = $charset_type"
+            '/^charset_type\s*=.*$/m' => "charset_type = $charset_type",
+            '/^custom_headers\s*=.*$/m' => "custom_headers = " . str_replace("\n", "\\n", $custom_headers)
         ];
-        
         foreach ($patterns as $pattern => $replacement) {
             if (preg_match($pattern, $env_content)) {
                 $env_content = preg_replace($pattern, $replacement, $env_content);
             } else {
+                if (strpos($replacement, 'custom_headers =') === 0 && $custom_headers === '') continue;
                 $env_content .= "\n$replacement";
             }
         }
-        
         // 保存到.env文件
         file_put_contents($env_file, $env_content);
-        
         echo(json_encode(['code'=>0,'msg'=>'客户端配置已保存']));
         exit();
     }else{

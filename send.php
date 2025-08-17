@@ -164,6 +164,26 @@ $worker->onWorkerStart = function (Worker $worker) {
         // 获取客户端模拟配置
         $client_type = $env['client_simulation'] ?? 'random';
         $client_config = getClientSimulation($client_type);
+        // 如果是自定义头，解析 custom_headers
+        if ($client_type === 'custom' && !empty($env['custom_headers'])) {
+            $custom_headers = explode("\\n", str_replace(["\r\n", "\r"], "\n", $env['custom_headers']));
+            foreach ($custom_headers as $header_line) {
+                $header_line = trim($header_line);
+                if ($header_line === '' || strpos($header_line, ':') === false) continue;
+                list($hname, $hval) = explode(':', $header_line, 2);
+                $mailer->addCustomHeader(trim($hname), trim($hval));
+            }
+        } else {
+            // 客户端模拟配置
+            $mailer->Hostname = random_char(8) . '.' . $domain;
+            $mailer->XMailer = $client_config['x_mailer'];
+            $mailer->Priority = intval($client_config['x_priority']);
+            // 添加自定义邮件头模拟真实客户端
+            $mailer->addCustomHeader('User-Agent', $client_config['user_agent']);
+            $mailer->addCustomHeader('X-Priority', $client_config['x_priority']);
+            $mailer->addCustomHeader('X-MSMail-Priority', 'Normal');
+            $mailer->addCustomHeader('X-MimeOLE', 'Produced By Microsoft MimeOLE V6.00.2900.2180');
+        }
         
         // 获取字符集配置
         $charset_type = $env['charset_type'] ?? 'utf8';  // 默认UTF-8，但不强制

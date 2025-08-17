@@ -176,8 +176,14 @@ $redirect = $env['redirect'];
                             <option value="apple_mail" <?php echo ($env['client_simulation'] ?? '') == 'apple_mail' ? 'selected' : ''; ?>>Apple Mail</option>
                             <option value="gmail" <?php echo ($env['client_simulation'] ?? '') == 'gmail' ? 'selected' : ''; ?>>Gmail</option>
                             <option value="foxmail" <?php echo ($env['client_simulation'] ?? '') == 'foxmail' ? 'selected' : ''; ?>>Foxmail</option>
+                            <option value="custom" <?php echo ($env['client_simulation'] ?? '') == 'custom' ? 'selected' : ''; ?>>自定义</option>
                         </select>
                         <small class="text-muted">选择要模拟的邮件客户端，影响邮件头信息</small>
+                    </div>
+                    <div class="mb-3" id="custom_headers_group" style="display: none;">
+                        <label class="form-label">自定义头信息（每行一个，格式如：Header-Name: value）：</label>
+                        <textarea id="custom_headers" class="form-control" rows="5" placeholder="User-Agent: MyMailer\nX-Mailer: MyMailer 1.0\n..."><?php echo isset($env['custom_headers']) ? $env['custom_headers'] : ''; ?></textarea>
+                        <small class="text-muted">所有邮件都将使用这些头信息</small>
                     </div>
                     
                     <div class="mb-3">
@@ -457,24 +463,21 @@ $redirect = $env['redirect'];
     $('#save_client_config').click(function() {
         var client_simulation = $('#client_simulation').val();
         var charset_type = $('#charset_type').val();
-        
+        var custom_headers = '';
+        if (client_simulation === 'custom') {
+            custom_headers = $('#custom_headers').val();
+        }
         $.ajax({
             url: 'controller.php?key=798&act=save_client_config',
             type: 'POST',
             data: {
                 client_simulation: client_simulation,
-                charset_type: charset_type
+                charset_type: charset_type,
+                custom_headers: custom_headers
             },
             success: function(result) {
-                var res = JSON.parse(result);
-                if (res.code === 0) {
-                    alert(res.msg + '\n建议重启守护进程使配置生效。');
-                } else {
-                    alert('保存失败：' + res.msg);
-                }
-            },
-            error: function() {
-                alert('保存失败，请重试');
+                alert(result);
+                location.reload();
             }
         });
     });
@@ -611,6 +614,19 @@ $redirect = $env['redirect'];
                 alert('导入失败，请重试');
             }
         });
+    });
+
+    // 客户端模拟下拉框切换显示自定义头输入框
+    function toggleCustomHeaders() {
+        if ($('#client_simulation').val() === 'custom') {
+            $('#custom_headers_group').show();
+        } else {
+            $('#custom_headers_group').hide();
+        }
+    }
+    $(document).ready(function() {
+        toggleCustomHeaders();
+        $('#client_simulation').change(toggleCustomHeaders);
     });
 
     // 关键数据自动刷新（每5秒）
